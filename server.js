@@ -20,7 +20,7 @@ app.use(bodyParser.json());
 // app.use('/upload', uploadRoute);
 
 app.use(cors({
-  origin: 'http://localhost:5173', // allow Vite frontend
+  origin: 'chatbot-blue-zeta.vercel.app', // allow Vite frontend
   credentials: true                // allow cookies/auth headers if needed
 }));
 app.use(cors());
