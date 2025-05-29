@@ -195,14 +195,19 @@ app.get('/chats', authenticateToken, async (req, res) => {
   }
 });
 
+app.use(express.urlencoded({ extended: true }));
 // WhatsApp webhook
 app.post('/whatsapp', async (req, res) => {
   const incomingMessage = req.body.Body;
   const fromNumber = req.body.From;
 
   try {
-    // You can replace this logic to match user via phone number if you store it
-    const user = await User.findOne(); // just grabs any user for testing
+    if (!fromNumber) {
+      console.error('Missing "From" in request body:', req.body);
+      return res.status(400).send('Missing sender number.');
+    }
+
+    const user = await User.findOne();
 
     if (!incomingMessage || typeof incomingMessage !== 'string') {
       await twilioClient.messages.create({
