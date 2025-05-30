@@ -66,6 +66,9 @@ function authenticateToken(req, res, next) {
   }
 }
 
+app.get('/', (req, res) => {
+  res.status(200).send('Server is running');
+});
 
 // Signup
 app.post('/signup', async (req, res) => {
