@@ -10,6 +10,7 @@ const bcrypt = require('bcrypt');
 const User = require('./models/User');
 const Chat = require('./models/Chat');
 const cors = require('cors');
+const { job } = require('./cron');
 // const uploadRoute = require('./routes/upload');
 // const authenticateToken = require('./middleware/authenticateToken')
 
@@ -18,7 +19,7 @@ const app = express();
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 // app.use('/upload', uploadRoute);
-
+job.start(); 
 app.use(cors({
   origin: 'https://chatbot-blue-zeta.vercel.app', // allow Vite frontend
   credentials: true                // allow cookies/auth headers if needed
