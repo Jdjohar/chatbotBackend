@@ -11,7 +11,7 @@
   const apiUrl = 'https://chatbotbackend-mpah.onrender.com';
 
   // Function to apply styles
-  const applyStyles = (settings) => {
+  function applyStyles(settings) {
     const style = document.createElement('style');
     style.textContent = `
       #chatbot-widget {
@@ -72,31 +72,146 @@
       }
     `;
     document.head.appendChild(style);
-  };
+  }
 
   // Load React and ReactDOM
   const scripts = [
-    {
-      src: 'https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js',
-      loaded: false
-    },
-    {
-      src: 'https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js',
-      loaded: false
-    }
+    { src: 'https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js', loaded: false },
+    { src: 'https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js', loaded: false }
   ];
 
   let scriptsLoaded = 0;
-  const onScriptLoad = () => {
+  function renderWidget() {
+    if (!window.React || !window.ReactDOM || !window.React.Component) {
+      widgetDiv.innerHTML = '<div style="padding: 10px; color: red;">Failed to load chatbot dependencies.</div>';
+      return;
+    }
+
+    // Define ChatbotWidget inside renderWidget to ensure React is loaded
+    const e = window.React.createElement;
+    class ChatbotWidget extends window.React.Component {
+      constructor(props) {
+        super(props);
+        this.state = {
+          messages: [],
+          input: '',
+          loading: false
+        };
+        this.messagesEndRef = window.React.createRef();
+      }
+
+      componentDidMount() {
+        this.fetchChats();
+      }
+
+      fetchChats = async () => {
+        try {
+          const res = await fetch(`${apiUrl}/chats`, {
+            headers: { 'X-API-Key': apiKey }
+          });
+          if (!res.ok) throw new Error('Failed to fetch chats');
+          const chats = await res.json();
+          this.setState({
+            messages: chats.flatMap(c => [
+              { sender: 'user', text: c.message },
+              ...(c.reply ? [{ sender: 'bot', text: c.reply }] : [])
+            ])
+          }, this.scrollToBottom);
+        } catch (err) {
+          console.error('Error fetching chats:', err);
+          this.setState({
+            messages: [...this.state.messages, { sender: 'bot', text: 'Error loading chat history.' }]
+          });
+        }
+      };
+
+      sendMessage = async () => {
+        const { input, messages } = this.state;
+        if (!input.trim()) return;
+        this.setState({ 
+          loading: true, 
+          messages: [...messages, { sender: 'user', text: input }],
+          input: ''
+        }, this.scrollToBottom);
+        try {
+          const res = await fetch(`${apiUrl}/chat`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-API-Key': apiKey
+            },
+            body: JSON.stringify({ message: input })
+          });
+          if (!res.ok) throw new Error('Failed to send message');
+          const { reply } = await res.json();
+          this.setState({
+            messages: [...this.state.messages, { sender: 'bot', text: reply }],
+            loading: false
+          }, this.scrollToBottom);
+        } catch (err) {
+          console.error('Error sending message:', err);
+          this.setState({
+            messages: [...this.state.messages, { sender: 'bot', text: 'Error contacting server.' }],
+            loading: false
+          }, this.scrollToBottom);
+        }
+      };
+
+      scrollToBottom = () => {
+        this.messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      };
+
+      render() {
+        const { messages, input, loading } = this.state;
+        return e('div', null, [
+          e('div', { id: 'chatbot-header' }, 'AI Assistant'),
+          e('div', { id: 'chatbot-messages' }, 
+            messages.map((msg, i) => 
+              e('div', { key: i, className: `message ${msg.sender}` }, msg.text)
+            ),
+            loading ? e('div', { className: 'message bot' }, '...') : null,
+            e('div', { ref: this.messagesEndRef })
+          ),
+          e('div', { id: 'chatbot-input' }, [
+            e('input', {
+              type: 'text',
+              value: input,
+              onChange: e => this.setState({ input: e.target.value }),
+              onKeyPress: e => e.key === 'Enter' && this.sendMessage(),
+              placeholder: 'Type your message...',
+              disabled: loading
+            }),
+            e('button', { onClick: this.sendMessage, disabled: loading }, 'Send')
+          ])
+        ]);
+      }
+    }
+
+    fetch(`${apiUrl}/widget/settings/${userId}`)
+      .then(res => {
+        if (!res.ok) throw new Error('Failed to fetch settings');
+        return res.json();
+      })
+      .then(settings => {
+        applyStyles(settings);
+        window.ReactDOM.render(e(ChatbotWidget), widgetDiv);
+      })
+      .catch(err => {
+        console.error('Settings fetch error:', err);
+        widgetDiv.innerHTML = '<div style="padding: 10px; color: red;">Failed to load widget settings.</div>';
+      });
+  }
+
+  function onScriptLoad() {
     scriptsLoaded++;
     if (scriptsLoaded === scripts.length) {
       renderWidget();
     }
-  };
+  }
 
-  const onScriptError = () => {
+  function onScriptError() {
     widgetDiv.innerHTML = '<div style="padding: 10px; color: red;">Failed to load chatbot dependencies. Please try again later.</div>';
-  };
+  }
 
   scripts.forEach(script => {
     const scriptTag = document.createElement('script');
@@ -109,125 +224,4 @@
     scriptTag.onerror = onScriptError;
     document.head.appendChild(scriptTag);
   });
-
-  // React widget component
-  const e = () => window.React.createElement; // Lazy access to React.createElement
-  class ChatbotWidget extends window.React.Component {
-    constructor(props) {
-      super(props);
-      this.state = {
-        messages: [],
-        input: '',
-        loading: false
-      };
-      this.messagesEndRef = window.React.createRef();
-    }
-
-    componentDidMount() {
-      this.fetchChats();
-    }
-
-    fetchChats = async () => {
-      try {
-        const res = await fetch(`${apiUrl}/chats`, {
-          headers: { 'X-API-Key': apiKey }
-        });
-        if (!res.ok) throw new Error('Failed to fetch chats');
-        const chats = await res.json();
-        this.setState({
-          messages: chats.flatMap(c => [
-            { sender: 'user', text: c.message },
-            ...(c.reply ? [{ sender: 'bot', text: c.reply }] : [])
-          ])
-        }, this.scrollToBottom);
-      } catch (err) {
-        console.error('Error fetching chats:', err);
-        this.setState({
-          messages: [...this.state.messages, { sender: 'bot', text: 'Error loading chat history.' }]
-        });
-      }
-    };
-
-    sendMessage = async () => {
-      const { input, messages } = this.state;
-      if (!input.trim()) return;
-      this.setState({ 
-        loading: true, 
-        messages: [...messages, { sender: 'user', text: input }],
-        input: ''
-      }, this.scrollToBottom);
-      try {
-        const res = await fetch(`${apiUrl}/chat`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-API-Key': apiKey
-          },
-          body: JSON.stringify({ message: input })
-        });
-        if (!res.ok) throw new Error('Failed to send message');
-        const { reply } = await res.json();
-        this.setState({
-          messages: [...this.state.messages, { sender: 'bot', text: reply }],
-          loading: false
-        }, this.scrollToBottom);
-      } catch (err) {
-        console.error('Error sending message:', err);
-        this.setState({
-          messages: [...this.state.messages, { sender: 'bot', text: 'Error contacting server.' }],
-          loading: false
-        }, this.scrollToBottom);
-      }
-    };
-
-    scrollToBottom = () => {
-      this.messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    };
-
-    render() {
-      const { messages, input, loading } = this.state;
-      return e()('div', null, [
-        e()('div', { id: 'chatbot-header' }, 'AI Assistant'),
-        e()('div', { id: 'chatbot-messages' }, 
-          messages.map((msg, i) => 
-            e()('div', { key: i, className: `message ${msg.sender}` }, msg.text)
-          ),
-          loading ? e()('div', { className: 'message bot' }, '...') : null,
-          e()('div', { ref: this.messagesEndRef })
-        ),
-        e()('div', { id: 'chatbot-input' }, [
-          e()('input', {
-            type: 'text',
-            value: input,
-            onChange: e => this.setState({ input: e.target.value }),
-            onKeyPress: e => e.key === 'Enter' && this.sendMessage(),
-            placeholder: 'Type your message...',
-            disabled: loading
-          }),
-          e()('button', { onClick: this.sendMessage, disabled: loading }, 'Send')
-        ])
-      ]);
-    }
-  }
-
-  // Render widget
-  const renderWidget = () => {
-    if (!window.React || !window.ReactDOM) {
-      widgetDiv.innerHTML = '<div style="padding: 10px; color: red;">Failed to load chatbot dependencies.</div>';
-      return;
-    }
-    fetch(`${apiUrl}/widget/settings/${userId}`)
-      .then(res => {
-        if (!res.ok) throw new Error('Failed to fetch settings');
-        return res.json();
-      })
-      .then(settings => {
-        applyStyles(settings);
-        window.ReactDOM.render(e()(ChatbotWidget), widgetDiv);
-      })
-      .catch(err => {
-        console.error('Settings fetch error:', err);
-        widgetDiv.innerHTML = '<div style="padding: 10px; color: red;">Failed to load widget settings.</div>';
-      });
-  };
 })();
