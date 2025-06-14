@@ -30,5 +30,15 @@ router.post('/settings', async (req, res) => {
     res.status(500).json({ error: 'Failed to update settings' });
   }
 });
+router.get('/settings/:userId', async (req, res) => {
+  try {
+    const user = await User.findById(req.params.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    res.json(user.widgetSettings);
+  } catch (err) {
+    console.error('Settings error:', err);
+    res.status(500).json({ error: 'Failed to fetch settings' });
+  }
+});
 
 module.exports = router;
