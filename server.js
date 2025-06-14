@@ -22,11 +22,34 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 // app.use('/upload', uploadRoute);
 job.start(); 
-app.use(cors({
-  origin: 'https://chatbot-blue-zeta.vercel.app', // allow Vite frontend
-  credentials: true                // allow cookies/auth headers if needed
-}));
-app.use(cors());
+// app.use(cors({
+//   origin: 'https://chatbot-blue-zeta.vercel.app', // allow Vite frontend
+//   credentials: true                // allow cookies/auth headers if needed
+// }));
+// app.use(cors());
+// List of allowed origins
+const allowedOrigins = [
+  'https://chatbot-blue-zeta.vercel.app',
+  'https://careerengine.in',
+  'http://localhost:5173'
+];
+
+// CORS options
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    } else {
+      return callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true
+};
+
+// Use the CORS middleware
+app.use(cors(corsOptions));
 // Connect to MongoDB
 mongoose.connect(process.env.MONGODB_URI, {
   useNewUrlParser: true,
