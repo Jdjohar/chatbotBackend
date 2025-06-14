@@ -9,6 +9,8 @@ const dotenv = require('dotenv');
 const bcrypt = require('bcrypt');
 const User = require('./models/User');
 const Chat = require('./models/Chat');
+const Analytics = require('./models/Analytics');
+const widgetRoute = require('./routes/widget');
 const cors = require('cors');
 // const uploadRoute = require('./routes/upload');
 // const authenticateToken = require('./middleware/authenticateToken')
@@ -20,7 +22,8 @@ app.use(bodyParser.json());
 // app.use('/upload', uploadRoute);
 
 app.use(cors({
-  origin: 'https://chatbot-blue-zeta.vercel.app', // allow Vite frontend
+  // origin: 'https://chatbot-blue-zeta.vercel.app', // allow Vite frontend
+  origin: 'http://localhost:5173', // allow Vite frontend
   credentials: true                // allow cookies/auth headers if needed
 }));
 app.use(cors());
@@ -30,7 +33,7 @@ mongoose.connect(process.env.MONGODB_URI, {
   useUnifiedTopology: true,
 });
 console.log('MongoDB connected');
-
+app.use('/static', express.static('static'));
 const checkLimits = async (req, res, next) => {
   const user = await User.findById(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found' });
@@ -41,7 +44,7 @@ const checkLimits = async (req, res, next) => {
 
   next();
 };
-
+app.use('/static', express.static('static'));
 
 // OpenAI & Pinecone initialization
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -65,7 +68,7 @@ function authenticateToken(req, res, next) {
   }
 }
 
-
+app.use('/widget', widgetRoute);
 // Signup
 app.post('/signup', async (req, res) => {
   const { username, password } = req.body;
@@ -157,6 +160,17 @@ app.post('/upload', authenticateToken, checkLimits, async (req, res) => {
 // Inside your /chat endpoint
 app.post('/chat', authenticateToken, async (req, res) => {
   const { message } = req.body;
+
+  const analytics = await Analytics.findOne({ userId: req.user.id });
+  if (analytics) {
+    analytics.conversationCount += 1;
+    const question = analytics.commonQuestions.find(q => q.question === message);
+    if (question) question.count += 1;
+    else analytics.commonQuestions.push({ question: message, count: 1 });
+    await analytics.save();
+  } else {
+    await Analytics.create({ userId: req.user.id, conversationCount: 1, commonQuestions: [{ question: message, count: 1 }] });
+  }
 
   if (!message || typeof message !== 'string') {
     return res.status(400).json({ error: 'Invalid message' });
