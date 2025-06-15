@@ -51,11 +51,12 @@ const checkLimits = async (req, res, next) => {
   try {
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
+    console.log('checkLimits:', { userId: req.user.id, plan: user.plan, uploadCount: user.uploadCount });
     if (user.plan === 'paid' && user.subscriptionStatus === 'active') {
       return next();
     }
     if (user.uploadCount >= 5) {
-      return res.status(403).json({ error: UPGRADE_MESSAGE });
+      return res.status(403).json({ reply: UPGRADE_MESSAGE });
     }
     next();
   } catch (err) {
@@ -172,7 +173,9 @@ app.post('/chat', authenticateApiKey, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
+    console.log('Chat request:', { userId: req.user.id, plan: user.plan, questionCount: user.questionCount });
     if (user.plan === 'free' && user.questionCount >= 20) {
+      console.log('Question limit reached for user:', req.user.id);
       return res.status(403).json({ reply: UPGRADE_MESSAGE });
     }
     const analytics = await Analytics.findOne({ userId: req.user.id });
@@ -190,6 +193,10 @@ app.post('/chat', authenticateApiKey, async (req, res) => {
       });
     }
     const reply = await processMessage(message, user, visitorId);
+    if (reply === UPGRADE_MESSAGE) {
+      console.log('Returning upgrade message for user:', req.user.id);
+      return res.status(403).json({ reply });
+    }
     const chat = new Chat({ userId: user._id, visitorId, message, reply });
     await chat.save();
     if (user.plan === 'free') {
@@ -238,6 +245,7 @@ app.post('/whatsapp', async (req, res) => {
       return res.status(200).send('OK');
     }
     if (user.plan === 'free' && user.questionCount >= 20) {
+      console.log('WhatsApp question limit reached for user:', user._id);
       await twilioClient.messages.create({
         body: UPGRADE_MESSAGE,
         from: `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`,
@@ -246,6 +254,15 @@ app.post('/whatsapp', async (req, res) => {
       return res.status(200).send('OK');
     }
     const reply = await processMessage(incomingMessage, user, 'default');
+    if (reply === UPGRADE_MESSAGE) {
+      console.log('WhatsApp returning upgrade message for user:', user._id);
+      await twilioClient.messages.create({
+        body: reply,
+        from: `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`,
+        to: fromNumber,
+      });
+      return res.status(200).send('OK');
+    }
     await twilioClient.messages.create({
       body: reply,
       from: `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`,
@@ -263,7 +280,9 @@ app.post('/whatsapp', async (req, res) => {
 });
 
 async function processMessage(message, user, visitorId = 'default') {
+  console.log('processMessage:', { userId: user._id, plan: user.plan, questionCount: user.questionCount });
   if (user.plan === 'free' && user.questionCount >= 20) {
+    console.log('Question limit reached in processMessage for user:', user._id);
     return UPGRADE_MESSAGE;
   }
   if (!visitorId || typeof visitorId !== 'string') {

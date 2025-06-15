@@ -238,10 +238,17 @@
             },
             body: JSON.stringify({ message: input, visitorId })
           });
-          if (!res.ok) throw new Error('Failed to send message');
-          const { reply } = await res.json();
+          const data = await res.json();
+          if (!res.ok) {
+            console.error('Chat API error:', data);
+            this.setState({
+              messages: [...this.state.messages, { sender: 'bot', text: data.reply || data.error || 'Error contacting server. Please try again.' }],
+              loading: false
+            }, this.scrollToBottom);
+            return;
+          }
           this.setState({
-            messages: [...this.state.messages, { sender: 'bot', text: reply }],
+            messages: [...this.state.messages, { sender: 'bot', text: data.reply }],
             loading: false
           }, this.scrollToBottom);
         } catch (err) {
@@ -274,7 +281,6 @@
         let lastIndex = 0;
         const matches = [];
 
-        // Collect all matches with their types and indices
         text.replace(emailRegex, (match, index) => {
           matches.push({ type: 'email', value: match, index });
         });
@@ -285,10 +291,8 @@
           matches.push({ type: 'url', value: match, index });
         });
 
-        // Sort matches by index to process in order
         matches.sort((a, b) => a.index - b.index);
 
-        // Build parts array with text and links
         matches.forEach(match => {
           if (match.index > lastIndex) {
             parts.push(text.slice(lastIndex, match.index));
