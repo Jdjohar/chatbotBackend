@@ -15,6 +15,7 @@ const cors = require('cors');
 const { job } = require('./cron');
 // const uploadRoute = require('./routes/upload');
 // const authenticateToken = require('./middleware/authenticateToken')
+const authenticateApiKey = require('./middleware/authenticateApiKey');
 
 dotenv.config();
 const app = express();
@@ -92,6 +93,16 @@ function authenticateToken(req, res, next) {
 }
 
 app.use('/widget', widgetRoute);
+app.get('/chats', authenticateApiKey, async (req, res) => {
+  try {
+    const chats = await Chat.find({ userId: req.user.id }).sort({ createdAt: 1 });
+    res.json(chats);
+  } catch (err) {
+    console.error('Chat history error:', err);
+    res.status(500).json({ error: 'Failed to fetch chat history' });
+  }
+});
+
 // Signup
 app.post('/signup', async (req, res) => {
   const { username, password } = req.body;

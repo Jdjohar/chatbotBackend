@@ -10,6 +10,20 @@
   const apiKey = widgetScript.dataset.apiKey;
   const apiUrl = 'https://chatbotbackend-mpah.onrender.com';
 
+  // Generate or retrieve visitorId
+  let visitorId = localStorage.getItem('chatbot_visitor_id');
+  if (!visitorId) {
+    visitorId = 'visitor_' + Math.random().toString(36).substr(2, 9);
+    localStorage.setItem('chatbot_visitor_id', visitorId);
+  }
+
+  // Default settings
+  const defaultSettings = {
+    theme: '#1e3a8a',
+    position: 'bottom-right',
+    avatar: ''
+  };
+
   // Function to apply styles
   function applyStyles(settings) {
     const style = document.createElement('style');
@@ -87,7 +101,6 @@
       return;
     }
 
-    // Define ChatbotWidget inside renderWidget to ensure React is loaded
     const e = window.React.createElement;
     class ChatbotWidget extends window.React.Component {
       constructor(props) {
@@ -106,7 +119,7 @@
 
       fetchChats = async () => {
         try {
-          const res = await fetch(`${apiUrl}/chats`, {
+          const res = await fetch(`${apiUrl}/chats?visitorId=${visitorId}`, {
             headers: { 'X-API-Key': apiKey }
           });
           if (!res.ok) throw new Error('Failed to fetch chats');
@@ -120,7 +133,7 @@
         } catch (err) {
           console.error('Error fetching chats:', err);
           this.setState({
-            messages: [...this.state.messages, { sender: 'bot', text: 'Error loading chat history.' }]
+            messages: [...this.state.messages, { sender: 'bot', text: 'Error loading chat history. Please try again.' }]
           });
         }
       };
@@ -140,7 +153,7 @@
               'Content-Type': 'application/json',
               'X-API-Key': apiKey
             },
-            body: JSON.stringify({ message: input })
+            body: JSON.stringify({ message: input, visitorId })
           });
           if (!res.ok) throw new Error('Failed to send message');
           const { reply } = await res.json();
@@ -151,7 +164,7 @@
         } catch (err) {
           console.error('Error sending message:', err);
           this.setState({
-            messages: [...this.state.messages, { sender: 'bot', text: 'Error contacting server.' }],
+            messages: [...this.state.messages, { sender: 'bot', text: 'Error contacting server. Please try again.' }],
             loading: false
           }, this.scrollToBottom);
         }
@@ -198,7 +211,8 @@
       })
       .catch(err => {
         console.error('Settings fetch error:', err);
-        widgetDiv.innerHTML = '<div style="padding: 10px; color: red;">Failed to load widget settings.</div>';
+        applyStyles(defaultSettings);
+        window.ReactDOM.render(e(ChatbotWidget), widgetDiv);
       });
   }
 
