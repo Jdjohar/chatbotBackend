@@ -294,7 +294,7 @@
           matches.push({ type: 'email', value: match[0], index: match.index, length: match[0].length });
         }
         while ((match = phoneRegex.exec(text)) !== null) {
-          matches.push({ type: 'phone', value: match[0], index: match.index, length: image.pngmatch[0].length });
+          matches.push({ type: 'phone', value: match[0], index: match.index, length: match[0].length });
         }
         while ((match = urlRegex.exec(text)) !== null) {
           matches.push({ type: 'url', value: match[0], index: match.index, length: match[0].length });
