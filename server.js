@@ -13,45 +13,31 @@ const Analytics = require('./models/Analytics');
 const widgetRoute = require('./routes/widget');
 const cors = require('cors');
 const { job } = require('./cron');
-// const uploadRoute = require('./routes/upload');
-// const authenticateToken = require('./middleware/authenticateToken')
-const authenticateApiKey = require('./middleware/authenticateApiKey');
+const authenticateApiKey = require('middleware/authenticateApiKey');
 
 dotenv.config();
 const app = express();
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
-// app.use('/upload', uploadRoute);
-job.start(); 
-// app.use(cors({
-//   origin: 'https://chatbot-blue-zeta.vercel.app', // allow Vite frontend
-//   credentials: true                // allow cookies/auth headers if needed
-// }));
-// app.use(cors());
-// List of allowed origins
+
 const allowedOrigins = [
   'https://chatbot-blue-zeta.vercel.app',
   'https://careerengine.in',
   'http://localhost:5173'
 ];
 
-// CORS options
 const corsOptions = {
   origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
     } else {
-      return callback(new Error('Not allowed by CORS'));
+      callback(new Error('Not allowed by CORS'));
     }
   },
   credentials: true
 };
 
-// Use the CORS middleware
 app.use(cors(corsOptions));
-// Connect to MongoDB
 mongoose.connect(process.env.MONGODB_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
@@ -59,34 +45,36 @@ mongoose.connect(process.env.MONGODB_URI, {
 console.log('MongoDB connected');
 app.use('/static', express.static('static'));
 
+const UPGRADE_MESSAGE = 'You have reached your plan limit. Upgrade to the paid plan for unlimited questions and uploads at https://careerengine.in/upgrade.';
 
 const checkLimits = async (req, res, next) => {
-  const user = await User.findById(req.user.id);
-  if (!user) return res.status(404).json({ error: 'User not found' });
-
-  if (user.uploadCount >= 5) {
-    return res.status(403).json({ error: 'Upload limit reached (5)' });
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (user.plan === 'paid' && user.subscriptionStatus === 'active') {
+      return next();
+    }
+    if (user.uploadCount >= 5) {
+      return res.status(403).json({ error: UPGRADE_MESSAGE });
+    }
+    next();
+  } catch (err) {
+    console.error('Limit check error:', err);
+    res.status(500).json({ error: 'Server error' });
   }
-
-  next();
 };
 
-// OpenAI & Pinecone initialization
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const pinecone = new Pinecone({ apiKey: process.env.PINECONE_API_KEY });
 const index = pinecone.Index(process.env.PINECONE_INDEX);
-
-// Twilio initialization
 const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 
-// JWT middleware
 function authenticateToken(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader) return res.status(401).json({ error: 'Missing token' });
-
   try {
     const decoded = jwt.verify(authHeader.split(' ')[1], process.env.JWT_SECRET);
-    req.user = { id: decoded.userId };  // set this instead of req.userId
+    req.user = { id: decoded.userId };
     next();
   } catch {
     res.status(401).json({ error: 'Invalid token' });
@@ -94,7 +82,6 @@ function authenticateToken(req, res, next) {
 }
 
 app.use('/widget', widgetRoute);
-
 
 app.get('/chats', authenticateApiKey, async (req, res) => {
   const { visitorId } = req.query;
@@ -108,36 +95,27 @@ app.get('/chats', authenticateApiKey, async (req, res) => {
   }
 });
 
-
-// Signup
 app.post('/signup', async (req, res) => {
   const { username, password } = req.body;
   console.log(username, password);
-  
   const existing = await User.findOne({ username });
   if (existing) return res.status(400).json({ error: 'User already exists' });
-
   const hashed = await bcrypt.hash(password, 10);
   const user = new User({ username, password: hashed });
   await user.save();
   res.json({ message: 'User created' });
 });
 
-// Login
 app.post('/login', async (req, res) => {
   const { username, password } = req.body;
   const user = await User.findOne({ username });
   if (!user) return res.status(400).json({ error: 'Invalid login' });
-
   const valid = await bcrypt.compare(password, user.password);
   if (!valid) return res.status(400).json({ error: 'Invalid login' });
-
   const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET);
   res.json({ token });
 });
 
-
-// Upload route
 app.post('/upload', authenticateToken, checkLimits, async (req, res) => {
   const { data, filename, visitorId = 'default' } = req.body;
   console.log('Upload req.body:', { userId: req.user.id, visitorId, filename, dataLength: data?.length });
@@ -175,7 +153,9 @@ app.post('/upload', authenticateToken, checkLimits, async (req, res) => {
       console.log('Upserting vector:', { id: vectorId, userId: req.user.id, visitorId });
     }
     await index.upsert(vectors);
-    user.uploadCount += 1;
+    if (user.plan === 'free') {
+      user.uploadCount += 1;
+    }
     await user.save();
     res.status(200).json({ message: 'Data embedded and stored successfully' });
   } catch (err) {
@@ -184,11 +164,6 @@ app.post('/upload', authenticateToken, checkLimits, async (req, res) => {
   }
 });
 
-
-
-
-// Chat API with auth
-// Inside your /chat endpoint
 app.post('/chat', authenticateApiKey, async (req, res) => {
   const { message, visitorId } = req.body;
   if (!message || typeof message !== 'string' || !visitorId) {
@@ -197,8 +172,8 @@ app.post('/chat', authenticateApiKey, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
-    if (user.questionCount >= 20) {
-      return res.status(403).json({ reply: '❌ You have reached your 20-question limit.' });
+    if (user.plan === 'free' && user.questionCount >= 20) {
+      return res.status(403).json({ reply: UPGRADE_MESSAGE });
     }
     const analytics = await Analytics.findOne({ userId: req.user.id });
     if (analytics) {
@@ -217,7 +192,9 @@ app.post('/chat', authenticateApiKey, async (req, res) => {
     const reply = await processMessage(message, user, visitorId);
     const chat = new Chat({ userId: user._id, visitorId, message, reply });
     await chat.save();
-    user.questionCount += 1;
+    if (user.plan === 'free') {
+      user.questionCount += 1;
+    }
     await user.save();
     res.json({ reply });
   } catch (err) {
@@ -226,9 +203,23 @@ app.post('/chat', authenticateApiKey, async (req, res) => {
   }
 });
 
+app.get('/user/plan', authenticateApiKey, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select('plan subscriptionStatus questionCount uploadCount');
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    res.json({
+      plan: user.plan,
+      subscriptionStatus: user.subscriptionStatus,
+      questionCount: user.questionCount,
+      uploadCount: user.uploadCount
+    });
+  } catch (err) {
+    console.error('Plan fetch error:', err);
+    res.status(500).json({ error: 'Failed to fetch plan details' });
+  }
+});
 
 app.use(express.urlencoded({ extended: true }));
-// WhatsApp webhook
 app.post('/whatsapp', async (req, res) => {
   const incomingMessage = req.body.Body;
   const fromNumber = req.body.From;
@@ -246,12 +237,24 @@ app.post('/whatsapp', async (req, res) => {
       });
       return res.status(200).send('OK');
     }
+    if (user.plan === 'free' && user.questionCount >= 20) {
+      await twilioClient.messages.create({
+        body: UPGRADE_MESSAGE,
+        from: `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`,
+        to: fromNumber,
+      });
+      return res.status(200).send('OK');
+    }
     const reply = await processMessage(incomingMessage, user, 'default');
     await twilioClient.messages.create({
       body: reply,
       from: `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`,
       to: fromNumber,
     });
+    if (user.plan === 'free') {
+      user.questionCount += 1;
+      await user.save();
+    }
     res.status(200).send('OK');
   } catch (error) {
     console.error('Error processing WhatsApp message:', error.message);
@@ -259,41 +262,56 @@ app.post('/whatsapp', async (req, res) => {
   }
 });
 
-// Core logic: Embed + Completion
-async function processMessage(message, user) {
-  if (user.questionsUsed >= 20) {
-    return 'You have reached your 20-question limit.';
+async function processMessage(message, user, visitorId = 'default') {
+  if (user.plan === 'free' && user.questionCount >= 20) {
+    return UPGRADE_MESSAGE;
   }
-
-  const embeddingResponse = await openai.embeddings.create({
-    model: 'text-embedding-ada-002',
-    input: message.trim(),
-  });
-  const queryEmbedding = embeddingResponse.data[0].embedding;
-
-  const queryResponse = await index.query({
-    vector: queryEmbedding,
-    topK: 5,
-    includeMetadata: true,
-  });
-
-  const context = queryResponse.matches.map(match => match.metadata.text).join('\n');
-
-  const completionResponse = await openai.chat.completions.create({
-    model: 'gpt-3.5-turbo',
-    messages: [
-      {
-        role: 'system',
-        content: 'You are a helpful assistant. Use the provided context to answer questions accurately.',
-      },
-      { role: 'user', content: `Context: ${context}\n\nQuestion: ${message}` },
-    ],
-  });
-
-  user.questionsUsed += 1;
-  await user.save();
-
-  return completionResponse.choices[0].message.content;
+  if (!visitorId || typeof visitorId !== 'string') {
+    console.error('Invalid visitorId:', visitorId);
+    return 'Error: Invalid visitor ID.';
+  }
+  try {
+    const embeddingResponse = await openai.embeddings.create({
+      model: 'text-embedding-ada-002',
+      input: message.trim(),
+    });
+    const queryEmbedding = embeddingResponse.data[0].embedding;
+    const filter = {
+      userId: user._id.toString(),
+      visitorId
+    };
+    console.log('Pinecone query filter:', { userId: user._id.toString(), visitorId });
+    const queryResponse = await index.query({
+      vector: queryEmbedding,
+      topK: 5,
+      includeMetadata: true,
+      filter
+    });
+    console.log('Pinecone query results:', queryResponse.matches.map(m => ({
+      id: m.id,
+      userId: m.metadata.userId,
+      visitorId: m.metadata.visitorId
+    })));
+    const context = queryResponse.matches.map(match => match.metadata.text).join('\n');
+    const completionResponse = await openai.chat.completions.create({
+      model: 'gpt-3.5-turbo',
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a helpful assistant. Use the provided context to answer questions accurately.',
+        },
+        { role: 'user', content: `Context: ${context}\n\nQuestion: ${message}` },
+      ],
+    });
+    if (user.plan === 'free') {
+      user.questionCount += 1;
+      await user.save();
+    }
+    return completionResponse.choices[0].message.content;
+  } catch (err) {
+    console.error('Process message error:', err);
+    return 'Error processing your request.';
+  }
 }
 
 const PORT = process.env.PORT || 3000;
