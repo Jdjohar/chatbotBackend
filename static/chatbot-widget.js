@@ -1,52 +1,87 @@
 (function() {
-  // Create widget container
   const widgetDiv = document.createElement('div');
   widgetDiv.id = 'chatbot-widget';
   document.body.appendChild(widgetDiv);
 
-  // Get widget configuration
   const widgetScript = document.currentScript;
   const userId = widgetScript.dataset.userId;
   const apiKey = widgetScript.dataset.apiKey;
   const apiUrl = 'https://chatbotbackend-mpah.onrender.com';
 
-  // Generate or retrieve visitorId
   let visitorId = localStorage.getItem('chatbot_visitor_id');
   if (!visitorId) {
     visitorId = 'visitor_' + Math.random().toString(36).substr(2, 9);
     localStorage.setItem('chatbot_visitor_id', visitorId);
   }
 
-  // Default settings
   const defaultSettings = {
     theme: '#1e3a8a',
     position: 'bottom-right',
-    avatar: ''
+    avatar: '',
+    welcomeMessage: 'Hello! How can I assist you today?'
   };
 
-  // Function to apply styles
-  function applyStyles(settings) {
+  function applyStyles(settings, isMinimized) {
     const style = document.createElement('style');
     style.textContent = `
       #chatbot-widget {
         position: fixed;
         ${settings.position === 'bottom-right' ? 'bottom: 20px; right: 20px;' : 'bottom: 20px; left: 20px;'}
-        width: 300px;
-        height: 400px;
-        background: #fff;
-        border-radius: 10px;
-        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-        z-index: 1000;
-        font-family: Arial, sans-serif;
+        ${isMinimized ? `
+          width: 60px;
+          height: 60px;
+          background: ${settings.theme};
+          border-radius: 50%;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 1000;
+        ` : `
+          width: 300px;
+          height: 400px;
+          background: #fff;
+          border-radius: 10px;
+          box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+          z-index: 1000;
+          font-family: Arial, sans-serif;
+          display: flex;
+          flex-direction: column;
+        `}
+      }
+      #chatbot-minimized-icon {
+        color: white;
+        font-size: 24px;
       }
       #chatbot-header {
         background: ${settings.theme};
         color: white;
         padding: 10px;
         border-radius: 10px 10px 0 0;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      #chatbot-avatar {
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        object-fit: cover;
+        margin-right: 10px;
+      }
+      #chatbot-title {
+        flex: 1;
         text-align: center;
       }
+      #chatbot-minimize-btn {
+        background: none;
+        border: none;
+        color: white;
+        font-size: 16px;
+        cursor: pointer;
+      }
       #chatbot-messages {
+        flex: 1;
         height: 300px;
         overflow-y: auto;
         padding: 10px;
@@ -75,6 +110,8 @@
         margin: 5px 0;
         padding: 8px;
         border-radius: 5px;
+        display: flex;
+        align-items: center;
       }
       .user {
         background: #e0f2fe;
@@ -84,11 +121,16 @@
         background: #f3f4f6;
         margin-right: 10%;
       }
+      .bot img {
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        margin-right: 5px;
+      }
     `;
     document.head.appendChild(style);
   }
 
-  // Load React and ReactDOM
   const scripts = [
     { src: 'https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js', loaded: false },
     { src: 'https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js', loaded: false }
@@ -108,14 +150,40 @@
         this.state = {
           messages: [],
           input: '',
-          loading: false
+          loading: false,
+          isMinimized: false,
+          settings: defaultSettings
         };
         this.messagesEndRef = window.React.createRef();
       }
 
       componentDidMount() {
-        this.fetchChats();
+        this.fetchSettings();
       }
+
+      fetchSettings = async () => {
+        try {
+          const res = await fetch(`${apiUrl}/widget/settings/${userId}`);
+          if (!res.ok) throw new Error('Failed to fetch settings');
+          const settings = await res.json();
+          this.setState({ settings }, () => {
+            applyStyles(settings, this.state.isMinimized);
+            this.addWelcomeMessage();
+            this.fetchChats();
+          });
+        } catch (err) {
+          console.error('Settings fetch error:', err);
+          applyStyles(defaultSettings, this.state.isMinimized);
+          this.addWelcomeMessage();
+          this.fetchChats();
+        }
+      };
+
+      addWelcomeMessage = () => {
+        this.setState(prevState => ({
+          messages: [{ sender: 'bot', text: prevState.settings.welcomeMessage }]
+        }));
+      };
 
       fetchChats = async () => {
         try {
@@ -124,17 +192,23 @@
           });
           if (!res.ok) throw new Error('Failed to fetch chats');
           const chats = await res.json();
-          this.setState({
-            messages: chats.flatMap(c => [
-              { sender: 'user', text: c.message },
-              ...(c.reply ? [{ sender: 'bot', text: c.reply }] : [])
-            ])
-          }, this.scrollToBottom);
+          this.setState(prevState => ({
+            messages: [
+              { sender: 'bot', text: prevState.settings.welcomeMessage },
+              ...chats.flatMap(c => [
+                { sender: 'user', text: c.message },
+                ...(c.reply ? [{ sender: 'bot', text: c.reply }] : [])
+              ])
+            ]
+          }), this.scrollToBottom);
         } catch (err) {
           console.error('Error fetching chats:', err);
-          this.setState({
-            messages: [...this.state.messages, { sender: 'bot', text: 'Error loading chat history. Please try again.' }]
-          });
+          this.setState(prevState => ({
+            messages: [
+              ...prevState.messages,
+              { sender: 'bot', text: 'Error loading chat history. Please try again.' }
+            ]
+          }));
         }
       };
 
@@ -170,17 +244,37 @@
         }
       };
 
+      toggleMinimize = () => {
+        this.setState(prevState => {
+          const isMinimized = !prevState.isMinimized;
+          applyStyles(prevState.settings, isMinimized);
+          return { isMinimized };
+        });
+      };
+
       scrollToBottom = () => {
         this.messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
       };
 
       render() {
-        const { messages, input, loading } = this.state;
+        const { messages, input, loading, isMinimized, settings } = this.state;
+        if (isMinimized) {
+          return e('div', { onClick: this.toggleMinimize }, [
+            e('span', { id: 'chatbot-minimized-icon' }, '💬')
+          ]);
+        }
         return e('div', null, [
-          e('div', { id: 'chatbot-header' }, 'AI Assistant'),
+          e('div', { id: 'chatbot-header' }, [
+            settings.avatar ? e('img', { id: 'chatbot-avatar', src: settings.avatar, alt: 'Avatar' }) : null,
+            e('span', { id: 'chatbot-title' }, 'AI Assistant'),
+            e('button', { id: 'chatbot-minimize-btn', onClick: this.toggleMinimize }, '−')
+          ]),
           e('div', { id: 'chatbot-messages' }, 
             messages.map((msg, i) => 
-              e('div', { key: i, className: `message ${msg.sender}` }, msg.text)
+              e('div', { key: i, className: `message ${msg.sender}` }, [
+                msg.sender === 'bot' && settings.avatar ? e('img', { src: settings.avatar, alt: 'Bot' }) : null,
+                e('span', null, msg.text)
+              ])
             ),
             loading ? e('div', { className: 'message bot' }, '...') : null,
             e('div', { ref: this.messagesEndRef })
@@ -200,20 +294,7 @@
       }
     }
 
-    fetch(`${apiUrl}/widget/settings/${userId}`)
-      .then(res => {
-        if (!res.ok) throw new Error('Failed to fetch settings');
-        return res.json();
-      })
-      .then(settings => {
-        applyStyles(settings);
-        window.ReactDOM.render(e(ChatbotWidget), widgetDiv);
-      })
-      .catch(err => {
-        console.error('Settings fetch error:', err);
-        applyStyles(defaultSettings);
-        window.ReactDOM.render(e(ChatbotWidget), widgetDiv);
-      });
+    window.ReactDOM.render(e(ChatbotWidget), widgetDiv);
   }
 
   function onScriptLoad() {

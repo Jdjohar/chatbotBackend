@@ -17,6 +17,7 @@ const userSchema = new mongoose.Schema({
     theme: { type: String, default: '#1e3a8a' },
     position: { type: String, default: 'bottom-right' },
     avatar: { type: String, default: '' },
+    welcomeMessage: { type: String, default: 'Hello! How can I assist you today?' }
   },
   widgetApiKey: { type: String, default: () => uuidv4() }, // Unique API key for widget
 });
