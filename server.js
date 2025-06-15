@@ -13,7 +13,7 @@ const Analytics = require('./models/Analytics');
 const widgetRoute = require('./routes/widget');
 const cors = require('cors');
 const { job } = require('./cron');
-const authenticateApiKey = require('middleware/authenticateApiKey');
+const authenticateApiKey = require('./middleware/authenticateApiKey');
 
 dotenv.config();
 const app = express();
