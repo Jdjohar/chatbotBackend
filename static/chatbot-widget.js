@@ -160,7 +160,7 @@
           messages: [],
           input: '',
           loading: false,
-          isMinimized: false,
+          isMinimized: true, // Start minimized
           settings: defaultSettings
         };
         this.messagesEndRef = window.React.createRef();
@@ -177,14 +177,18 @@
           const settings = await res.json();
           this.setState({ settings }, () => {
             applyStyles(settings, this.state.isMinimized);
-            this.addWelcomeMessage();
-            this.fetchChats();
+            if (!this.state.isMinimized) {
+              this.addWelcomeMessage();
+              this.fetchChats();
+            }
           });
         } catch (err) {
           console.error('Settings fetch error:', err);
           applyStyles(defaultSettings, this.state.isMinimized);
-          this.addWelcomeMessage();
-          this.fetchChats();
+          if (!this.state.isMinimized) {
+            this.addWelcomeMessage();
+            this.fetchChats();
+          }
         }
       };
 
@@ -264,6 +268,10 @@
         this.setState(prevState => {
           const isMinimized = !prevState.isMinimized;
           applyStyles(prevState.settings, isMinimized);
+          if (!isMinimized && prevState.messages.length === 0) {
+            this.addWelcomeMessage();
+            this.fetchChats();
+          }
           return { isMinimized };
         });
       };
@@ -275,21 +283,22 @@
       renderMessageText(text) {
         const emailRegex = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g;
         const phoneRegex = /(\+?\d{1,4}[-.\s]?\(?\d{1,3}\)?[-.\s]?\d{1,4}[-.\s]?\d{1,4})/g;
-        const urlRegex = /(https?:\/\/[^\s]+)|(www\.[^\s]+)/g;
+        const urlRegex = /\b(https?:\/\/[^\s<>"']+)|(www\.[^\s<>"']+)\b/g;
 
         let parts = [];
         let lastIndex = 0;
         const matches = [];
 
-        text.replace(emailRegex, (match, index) => {
-          matches.push({ type: 'email', value: match, index });
-        });
-        text.replace(phoneRegex, (match, index) => {
-          matches.push({ type: 'phone', value: match, index });
-        });
-        text.replace(urlRegex, (match, index) => {
-          matches.push({ type: 'url', value: match, index });
-        });
+        let match;
+        while ((match = emailRegex.exec(text)) !== null) {
+          matches.push({ type: 'email', value: match[0], index: match.index, length: match[0].length });
+        }
+        while ((match = phoneRegex.exec(text)) !== null) {
+          matches.push({ type: 'phone', value: match[0], index: match.index, length: image.pngmatch[0].length });
+        }
+        while ((match = urlRegex.exec(text)) !== null) {
+          matches.push({ type: 'url', value: match[0], index: match.index, length: match[0].length });
+        }
 
         matches.sort((a, b) => a.index - b.index);
 
@@ -306,7 +315,7 @@
             const url = match.value.startsWith('www.') ? `https://${match.value}` : match.value;
             parts.push(e('a', { href: url, target: '_blank', rel: 'noopener noreferrer' }, match.value));
           }
-          lastIndex = match.index + match.value.length;
+          lastIndex = match.index + match.length;
         });
 
         if (lastIndex < text.length) {
@@ -320,7 +329,11 @@
         const { messages, input, loading, isMinimized, settings } = this.state;
         if (isMinimized) {
           return e('div', { onClick: this.toggleMinimize }, [
-            e('img', { id: 'chatbot-minimized-img', src: 'https://i.ibb.co/5hyptfLV/Dumala.png', alt: 'Chatbot' })
+            e('img', {
+              id: 'chatbot-minimized-img',
+              src: settings.avatar || 'https://i.ibb.co/5hyptfLV/Dumala.png',
+              alt: 'Chatbot'
+            })
           ]);
         }
         return e('div', null, [
