@@ -58,6 +58,8 @@ mongoose.connect(process.env.MONGODB_URI, {
 });
 console.log('MongoDB connected');
 app.use('/static', express.static('static'));
+
+
 const checkLimits = async (req, res, next) => {
   const user = await User.findById(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found' });
@@ -68,7 +70,6 @@ const checkLimits = async (req, res, next) => {
 
   next();
 };
-app.use('/static', express.static('static'));
 
 // OpenAI & Pinecone initialization
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -93,15 +94,20 @@ function authenticateToken(req, res, next) {
 }
 
 app.use('/widget', widgetRoute);
+
+
 app.get('/chats', authenticateApiKey, async (req, res) => {
+  const { visitorId } = req.query;
+  if (!visitorId) return res.status(400).json({ error: 'Missing visitorId' });
   try {
-    const chats = await Chat.find({ userId: req.user.id }).sort({ createdAt: 1 });
+    const chats = await Chat.find({ userId: req.user.id, visitorId }).sort({ createdAt: 1 });
     res.json(chats);
   } catch (err) {
     console.error('Chat history error:', err);
     res.status(500).json({ error: 'Failed to fetch chat history' });
   }
 });
+
 
 // Signup
 app.post('/signup', async (req, res) => {
@@ -133,54 +139,42 @@ app.post('/login', async (req, res) => {
 
 // Upload route
 app.post('/upload', authenticateToken, checkLimits, async (req, res) => {
-  const { data, filename } = req.body;
- console.log('req.body:', req.body);
+  const { data, filename, visitorId = 'default' } = req.body;
+  console.log('req.body:', req.body);
   if (!data || !filename) {
     return res.status(400).json({ error: 'Data and filename are required' });
   }
-
   try {
-    // Initialize OpenAI and Pinecone
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    const pinecone = new Pinecone({ apiKey: process.env.PINECONE_API_KEY });
-    const index = pinecone.Index(process.env.PINECONE_INDEX);
-
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
     const chunkSize = 2000;
     const chunks = [];
     for (let i = 0; i < data.length; i += chunkSize) {
       chunks.push(data.slice(i, i + chunkSize));
     }
-
+    const vectors = [];
     for (let i = 0; i < chunks.length; i++) {
-      const chunk = chunks[i];
+      const chunk = chunks[i].trim();
+      if (!chunk) continue;
       const embeddingResponse = await openai.embeddings.create({
         model: 'text-embedding-ada-002',
         input: chunk,
       });
-
       const embedding = embeddingResponse.data[0].embedding;
-
-      await index.upsert([
-        {
-          id: `${req.userId}_${filename}_${i}`,
-          values: embedding,
-          metadata: {
-            userId: req.user.id,
-            text: chunk,
-            filename,
-          },
-        },
-      ]);
+      vectors.push({
+        id: `${req.user.id}_${visitorId}_${filename}_${i}`,
+        values: embedding,
+        metadata: {
+          userId: req.user.id.toString(),
+          visitorId,
+          text: chunk,
+          filename
+        }
+      });
     }
-
-    // Increment user's upload count
-    const user = await User.findById(req.user.id);
-    console.log("user:",user);
-    console.log("req.userId:",req.user.id);
-    
+    await index.upsert(vectors);
     user.uploadCount += 1;
     await user.save();
-
     res.status(200).json({ message: 'Data embedded and stored successfully' });
   } catch (err) {
     console.error('Upload error:', err);
@@ -192,71 +186,55 @@ app.post('/upload', authenticateToken, checkLimits, async (req, res) => {
 
 // Chat API with auth
 // Inside your /chat endpoint
-app.post('/chat', authenticateToken, async (req, res) => {
-  const { message } = req.body;
-
-  const analytics = await Analytics.findOne({ userId: req.user.id });
-  if (analytics) {
-    analytics.conversationCount += 1;
-    const question = analytics.commonQuestions.find(q => q.question === message);
-    if (question) question.count += 1;
-    else analytics.commonQuestions.push({ question: message, count: 1 });
-    await analytics.save();
-  } else {
-    await Analytics.create({ userId: req.user.id, conversationCount: 1, commonQuestions: [{ question: message, count: 1 }] });
+app.post('/chat', authenticateApiKey, async (req, res) => {
+  const { message, visitorId } = req.body;
+  if (!message || typeof message !== 'string' || !visitorId) {
+    return res.status(400).json({ error: 'Invalid message or visitorId' });
   }
-
-  if (!message || typeof message !== 'string') {
-    return res.status(400).json({ error: 'Invalid message' });
-  }
-
   try {
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
-
     if (user.questionCount >= 20) {
       return res.status(403).json({ reply: '❌ You have reached your 20-question limit.' });
     }
-
-    const reply = await processMessage(message, user);
-
-    // Save chat to DB
-    const chat = new Chat({ userId: user._id, message, reply });
+    const analytics = await Analytics.findOne({ userId: req.user.id });
+    if (analytics) {
+      analytics.conversationCount += 1;
+      const question = analytics.commonQuestions.find(q => q.question === message);
+      if (question) question.count += 1;
+      else analytics.commonQuestions.push({ question: message, count: 1 });
+      await analytics.save();
+    } else {
+      await Analytics.create({
+        userId: req.user.id,
+        conversationCount: 1,
+        commonQuestions: [{ question: message, count: 1 }]
+      });
+    }
+    const reply = await processMessage(message, user, visitorId);
+    const chat = new Chat({ userId: user._id, visitorId, message, reply });
     await chat.save();
-
     user.questionCount += 1;
     await user.save();
-
     res.json({ reply });
   } catch (err) {
     console.error('Chat error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
-app.get('/chats', authenticateToken, async (req, res) => {
-  try {
-    const chats = await Chat.find({ userId: req.user.id }).sort({ createdAt: 1 });
-    res.json(chats);
-  } catch (err) {
-    console.error('Chat history error:', err);
-    res.status(500).json({ error: 'Failed to fetch chat history' });
-  }
-});
+
 
 app.use(express.urlencoded({ extended: true }));
 // WhatsApp webhook
 app.post('/whatsapp', async (req, res) => {
   const incomingMessage = req.body.Body;
   const fromNumber = req.body.From;
-
   try {
     if (!fromNumber) {
       console.error('Missing "From" in request body:', req.body);
       return res.status(400).send('Missing sender number.');
     }
-
     const user = await User.findOne();
-
     if (!incomingMessage || typeof incomingMessage !== 'string') {
       await twilioClient.messages.create({
         body: 'Please send a valid message.',
@@ -265,15 +243,12 @@ app.post('/whatsapp', async (req, res) => {
       });
       return res.status(200).send('OK');
     }
-
-    const reply = await processMessage(incomingMessage, user);
-
+    const reply = await processMessage(incomingMessage, user, 'default');
     await twilioClient.messages.create({
       body: reply,
       from: `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`,
       to: fromNumber,
     });
-
     res.status(200).send('OK');
   } catch (error) {
     console.error('Error processing WhatsApp message:', error.message);
