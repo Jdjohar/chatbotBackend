@@ -140,7 +140,7 @@ app.post('/login', async (req, res) => {
 // Upload route
 app.post('/upload', authenticateToken, checkLimits, async (req, res) => {
   const { data, filename, visitorId = 'default' } = req.body;
-  console.log('req.body:', req.body);
+  console.log('Upload req.body:', { userId: req.user.id, visitorId, filename, dataLength: data?.length });
   if (!data || !filename) {
     return res.status(400).json({ error: 'Data and filename are required' });
   }
@@ -161,8 +161,9 @@ app.post('/upload', authenticateToken, checkLimits, async (req, res) => {
         input: chunk,
       });
       const embedding = embeddingResponse.data[0].embedding;
+      const vectorId = `${req.user.id}_${visitorId}_${filename}_${i}`;
       vectors.push({
-        id: `${req.user.id}_${visitorId}_${filename}_${i}`,
+        id: vectorId,
         values: embedding,
         metadata: {
           userId: req.user.id.toString(),
@@ -171,6 +172,7 @@ app.post('/upload', authenticateToken, checkLimits, async (req, res) => {
           filename
         }
       });
+      console.log('Upserting vector:', { id: vectorId, userId: req.user.id, visitorId });
     }
     await index.upsert(vectors);
     user.uploadCount += 1;
@@ -181,6 +183,7 @@ app.post('/upload', authenticateToken, checkLimits, async (req, res) => {
     res.status(500).json({ error: 'Error processing upload' });
   }
 });
+
 
 
 

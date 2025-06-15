@@ -49,9 +49,11 @@
           flex-direction: column;
         `}
       }
-      #chatbot-minimized-icon {
-        color: white;
-        font-size: 24px;
+      #chatbot-minimized-img {
+        width: 40px;
+        height: 40px;
+        object-fit: cover;
+        border-radius: 50%;
       }
       #chatbot-header {
         background: ${settings.theme};
@@ -126,6 +128,13 @@
         height: 20px;
         border-radius: 50%;
         margin-right: 5px;
+      }
+      .message a {
+        color: ${settings.theme};
+        text-decoration: underline;
+      }
+      .message a:hover {
+        text-decoration: none;
       }
     `;
     document.head.appendChild(style);
@@ -256,11 +265,58 @@
         this.messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
       };
 
+      renderMessageText(text) {
+        const emailRegex = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g;
+        const phoneRegex = /(\+?\d{1,4}[-.\s]?\(?\d{1,3}\)?[-.\s]?\d{1,4}[-.\s]?\d{1,4})/g;
+        const urlRegex = /(https?:\/\/[^\s]+)|(www\.[^\s]+)/g;
+
+        let parts = [];
+        let lastIndex = 0;
+        const matches = [];
+
+        // Collect all matches with their types and indices
+        text.replace(emailRegex, (match, index) => {
+          matches.push({ type: 'email', value: match, index });
+        });
+        text.replace(phoneRegex, (match, index) => {
+          matches.push({ type: 'phone', value: match, index });
+        });
+        text.replace(urlRegex, (match, index) => {
+          matches.push({ type: 'url', value: match, index });
+        });
+
+        // Sort matches by index to process in order
+        matches.sort((a, b) => a.index - b.index);
+
+        // Build parts array with text and links
+        matches.forEach(match => {
+          if (match.index > lastIndex) {
+            parts.push(text.slice(lastIndex, match.index));
+          }
+          if (match.type === 'email') {
+            parts.push(e('a', { href: `mailto:${match.value}` }, match.value));
+          } else if (match.type === 'phone') {
+            const cleanedPhone = match.value.replace(/[-.\s()]/g, '');
+            parts.push(e('a', { href: `tel:${cleanedPhone}` }, match.value));
+          } else if (match.type === 'url') {
+            const url = match.value.startsWith('www.') ? `https://${match.value}` : match.value;
+            parts.push(e('a', { href: url, target: '_blank', rel: 'noopener noreferrer' }, match.value));
+          }
+          lastIndex = match.index + match.value.length;
+        });
+
+        if (lastIndex < text.length) {
+          parts.push(text.slice(lastIndex));
+        }
+
+        return parts.length > 0 ? parts : text;
+      }
+
       render() {
         const { messages, input, loading, isMinimized, settings } = this.state;
         if (isMinimized) {
           return e('div', { onClick: this.toggleMinimize }, [
-            e('span', { id: 'chatbot-minimized-icon' }, '💬')
+            e('img', { id: 'chatbot-minimized-img', src: 'https://i.ibb.co/5hyptfLV/Dumala.png', alt: 'Chatbot' })
           ]);
         }
         return e('div', null, [
@@ -273,7 +329,7 @@
             messages.map((msg, i) => 
               e('div', { key: i, className: `message ${msg.sender}` }, [
                 msg.sender === 'bot' && settings.avatar ? e('img', { src: settings.avatar, alt: 'Bot' }) : null,
-                e('span', null, msg.text)
+                e('span', null, this.renderMessageText(msg.text))
               ])
             ),
             loading ? e('div', { className: 'message bot' }, '...') : null,
