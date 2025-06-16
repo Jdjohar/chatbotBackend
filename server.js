@@ -13,7 +13,7 @@ const Analytics = require('./models/Analytics');
 const widgetRoute = require('./routes/widget');
 const cors = require('cors');
 const { job } = require('./cron');
-const authenticateApiKey = require('./middleware/authenticateApiKey');
+const authenticateApiKey = require('middleware/authenticateApiKey');
 
 dotenv.config();
 const app = express();
@@ -119,7 +119,7 @@ app.post('/login', async (req, res) => {
 
 app.post('/upload', authenticateToken, checkLimits, async (req, res) => {
   const { data, filename, visitorId = 'default' } = req.body;
-  console.log('Upload req.body:', { userId: req.user.id, visitorId, filename, dataLength: data?.length });
+  console.log('Upload request:', { userId: req.user.id, visitorId, filename, dataLength: data?.length });
   if (!data || !filename) {
     return res.status(400).json({ error: 'Data and filename are required' });
   }
@@ -151,9 +151,20 @@ app.post('/upload', authenticateToken, checkLimits, async (req, res) => {
           filename
         }
       });
-      console.log('Upserting vector:', { id: vectorId, userId: req.user.id, visitorId });
+      console.log('Upserting vector:', {
+        id: vectorId,
+        userId: req.user.id,
+        visitorId,
+        filename,
+        textLength: chunk.length
+      });
     }
-    await index.upsert(vectors);
+    if (vectors.length > 0) {
+      await index.upsert(vectors);
+      console.log('Vectors upserted:', { vectorCount: vectors.length, userId: req.user.id, visitorId });
+    } else {
+      console.warn('No vectors to upsert for upload:', { userId: req.user.id, visitorId, filename });
+    }
     if (user.plan === 'free') {
       user.uploadCount += 1;
     }
@@ -295,18 +306,18 @@ async function processMessage(message, user, visitorId = 'default') {
       input: message.trim(),
     });
     const queryEmbedding = embeddingResponse.data[0].embedding;
-    const filter = {
-      userId: user._id.toString(),
-      visitorId
-    };
-    console.log('Pinecone query:', { userId: user._id.toString(), visitorId, message });
-    const queryResponse = await index.query({
+    let queryResponse = await index.query({
       vector: queryEmbedding,
       topK: 5,
       includeMetadata: true,
-      filter
+      filter: {
+        userId: user._id.toString(),
+        visitorId
+      }
     });
-    console.log('Pinecone query results:', {
+    console.log('Pinecone query with visitorId filter:', {
+      userId: user._id.toString(),
+      visitorId,
       matchCount: queryResponse.matches.length,
       matches: queryResponse.matches.map(m => ({
         id: m.id,
@@ -317,6 +328,29 @@ async function processMessage(message, user, visitorId = 'default') {
         textLength: m.metadata.text.length
       }))
     });
+    if (queryResponse.matches.length === 0) {
+      console.warn('No matches with visitorId filter, trying userId only:', { userId: user._id.toString() });
+      queryResponse = await index.query({
+        vector: queryEmbedding,
+        topK: 5,
+        includeMetadata: true,
+        filter: {
+          userId: user._id.toString()
+        }
+      });
+      console.log('Pinecone query with userId only:', {
+        userId: user._id.toString(),
+        matchCount: queryResponse.matches.length,
+        matches: queryResponse.matches.map(m => ({
+          id: m.id,
+          score: m.score,
+          userId: m.metadata.userId,
+          visitorId: m.metadata.visitorId,
+          filename: m.metadata.filename,
+          textLength: m.metadata.text.length
+        }))
+      });
+    }
     const context = queryResponse.matches.map(match => match.metadata.text).join('\n');
     console.log('Context length:', context.length, 'Context sample:', context.slice(0, 200));
     if (!context) {
