@@ -299,37 +299,53 @@ async function processMessage(message, user, visitorId = 'default') {
       userId: user._id.toString(),
       visitorId
     };
-    console.log('Pinecone query filter:', { userId: user._id.toString(), visitorId });
+    console.log('Pinecone query:', { userId: user._id.toString(), visitorId, message });
     const queryResponse = await index.query({
       vector: queryEmbedding,
       topK: 5,
       includeMetadata: true,
       filter
     });
-    console.log('Pinecone query results:', queryResponse.matches.map(m => ({
-      id: m.id,
-      userId: m.metadata.userId,
-      visitorId: m.metadata.visitorId
-    })));
+    console.log('Pinecone query results:', {
+      matchCount: queryResponse.matches.length,
+      matches: queryResponse.matches.map(m => ({
+        id: m.id,
+        score: m.score,
+        userId: m.metadata.userId,
+        visitorId: m.metadata.visitorId,
+        filename: m.metadata.filename,
+        textLength: m.metadata.text.length
+      }))
+    });
     const context = queryResponse.matches.map(match => match.metadata.text).join('\n');
+    console.log('Context length:', context.length, 'Context sample:', context.slice(0, 200));
+    if (!context) {
+      console.warn('No context retrieved from Pinecone for query:', message);
+      return 'I don’t have any relevant information to answer this question. Please upload data or ask something else.';
+    }
     const completionResponse = await openai.chat.completions.create({
       model: 'gpt-3.5-turbo',
       messages: [
         {
           role: 'system',
-          content: 'You are a helpful assistant. Use the provided context to answer questions accurately.',
+          content: 'You are a helpful assistant. Use the provided context to answer questions accurately. If asked about the number of items (e.g., stories), count distinct items based on metadata (e.g., filename). Summarize or list items if relevant.',
         },
-        { role: 'user', content: `Context: ${context}\n\nQuestion: ${message}` },
+        {
+          role: 'user',
+          content: `Context: ${context}\n\nQuestion: ${message}`
+        },
       ],
     });
     if (user.plan === 'free') {
       user.questionCount += 1;
       await user.save();
     }
-    return completionResponse.choices[0].message.content;
+    const reply = completionResponse.choices[0].message.content;
+    console.log('GPT reply:', reply);
+    return reply;
   } catch (err) {
     console.error('Process message error:', err);
-    return 'Error processing your request.';
+    return 'Error processing your request. Please try again.';
   }
 }
 
