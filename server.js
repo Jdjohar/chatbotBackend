@@ -23,7 +23,9 @@ app.use('/static', express.static('static'));
 // Normalize domain: remove trailing slash, enforce lowercase
 const normalizeDomain = (domain) => {
   if (!domain) return domain;
-  return domain.toLowerCase().replace(/\/$/, '');
+  return domain.toLowerCase()
+    .replace(/^https?:\/\/(www\.)?/, 'https://') // unify www
+    .replace(/\/$/, '');
 };
 
 const STATIC_DOMAINS = ['https://chatbot-blue-zeta.vercel.app'];
