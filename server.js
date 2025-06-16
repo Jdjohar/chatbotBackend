@@ -29,10 +29,15 @@ const normalizeDomain = (domain) => {
 const corsOptions = {
   origin: async function (origin, callback) {
     try {
-      console.log('CORS check for origin:', origin);
+      console.log('CORS check:', { origin, url: this.url, method: this.method });
       if (!origin) {
-        console.log('No origin, allowing request');
-        return callback(null, true);
+        console.log('No origin, allowing request for URL:', this.url);
+        // Allow static and preflight requests without origin
+        if (this.url.startsWith('/static') || this.method === 'OPTIONS') {
+          return callback(null, true);
+        }
+        console.warn('Rejecting undefined origin for non-static/non-OPTIONS request:', this.url);
+        return callback(new Error('Origin required for this request'));
       }
       const normalizedOrigin = normalizeDomain(origin);
       console.log('Normalized origin:', normalizedOrigin);
@@ -54,7 +59,8 @@ const corsOptions = {
   },
   credentials: true,
   allowedHeaders: ['Authorization', 'Content-Type', 'X-API-Key'],
-  methods: ['GET', 'POST', 'OPTIONS']
+  methods: ['GET', 'POST', 'OPTIONS'],
+  preflightContinue: false
 };
 
 app.use(cors(corsOptions));
@@ -135,6 +141,17 @@ app.post('/login', async (req, res) => {
   if (!valid) return res.status(400).json({ error: 'Invalid login' });
   const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET);
   res.json({ token });
+});
+
+app.get('/user/domains', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select('allowedDomains');
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    res.json({ domains: user.allowedDomains });
+  } catch (err) {
+    console.error('Fetch domains error:', err);
+    res.status(500).json({ error: 'Failed to fetch domains' });
+  }
 });
 
 app.post('/add-domain', authenticateToken, async (req, res) => {
