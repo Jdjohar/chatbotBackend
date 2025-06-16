@@ -13,28 +13,48 @@ const Analytics = require('./models/Analytics');
 const widgetRoute = require('./routes/widget');
 const cors = require('cors');
 const { job } = require('./cron');
-const authenticateApiKey = require('./middleware/authenticateApiKey');
+const authenticateApiKey = require('middleware/authenticateApiKey');
 
 dotenv.config();
 const app = express();
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 
-const allowedOrigins = [
-  'https://chatbot-blue-zeta.vercel.app',
-  'https://careerengine.in',
-  'http://localhost:5173'
-];
+// Normalize domain: remove trailing slash, enforce lowercase
+const normalizeDomain = (domain) => {
+  if (!domain) return domain;
+  return domain.toLowerCase().replace(/\/$/, '');
+};
 
 const corsOptions = {
-  origin: function (origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
+  origin: async function (origin, callback) {
+    try {
+      console.log('CORS check for origin:', origin);
+      if (!origin) {
+        console.log('No origin, allowing request');
+        return callback(null, true);
+      }
+      const normalizedOrigin = normalizeDomain(origin);
+      console.log('Normalized origin:', normalizedOrigin);
+      if (normalizedOrigin.startsWith('http://localhost')) {
+        console.log('Allowing localhost origin');
+        return callback(null, true);
+      }
+      const user = await User.findOne({ allowedDomains: normalizedOrigin });
+      if (user) {
+        console.log('Origin allowed for user:', { userId: user._id, origin: normalizedOrigin });
+        return callback(null, true);
+      }
+      console.warn('CORS rejected for origin:', normalizedOrigin);
       callback(new Error('Not allowed by CORS'));
+    } catch (err) {
+      console.error('CORS processing error:', err);
+      callback(new Error('CORS processing error'));
     }
   },
-  credentials: true
+  credentials: true,
+  allowedHeaders: ['Authorization', 'Content-Type', 'X-API-Key'],
+  methods: ['GET', 'POST', 'OPTIONS']
 };
 
 app.use(cors(corsOptions));
@@ -115,6 +135,31 @@ app.post('/login', async (req, res) => {
   if (!valid) return res.status(400).json({ error: 'Invalid login' });
   const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET);
   res.json({ token });
+});
+
+app.post('/add-domain', authenticateToken, async (req, res) => {
+  const { domain } = req.body;
+  if (!domain || typeof domain !== 'string') {
+    return res.status(400).json({ error: 'Invalid domain' });
+  }
+  const normalizedDomain = normalizeDomain(domain);
+  const domainRegex = /^https?:\/\/([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}$/;
+  if (!domainRegex.test(normalizedDomain)) {
+    return res.status(400).json({ error: 'Invalid domain format. Must be a valid URL (e.g., https://customerwebsite.com)' });
+  }
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (!user.allowedDomains.includes(normalizedDomain)) {
+      user.allowedDomains.push(normalizedDomain);
+      await user.save();
+      console.log('Domain added:', { userId: req.user.id, domain: normalizedDomain });
+    }
+    res.json({ message: 'Domain added successfully' });
+  } catch (err) {
+    console.error('Add domain error:', err);
+    res.status(500).json({ error: 'Failed to add domain' });
+  }
 });
 
 app.post('/upload', authenticateToken, checkLimits, async (req, res) => {

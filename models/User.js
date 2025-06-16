@@ -15,6 +15,7 @@ const userSchema = new mongoose.Schema({
       timestamp: { type: Date, default: Date.now },
     },
   ],
+   allowedDomains: [{ type: String, default: [] }],
   widgetSettings: {
     theme: { type: String, default: '#1e3a8a' },
     position: { type: String, default: 'bottom-right' },
