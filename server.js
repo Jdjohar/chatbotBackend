@@ -26,6 +26,8 @@ const normalizeDomain = (domain) => {
   return domain.toLowerCase().replace(/\/$/, '');
 };
 
+const STATIC_DOMAINS = ['https://chatbot-blue-zeta.vercel.app'];
+
 const corsOptions = {
   origin: async function (origin, callback, req) {
     try {
@@ -38,7 +40,6 @@ const corsOptions = {
       });
       if (!origin) {
         console.log('No origin, allowing request for URL:', req ? req.url : 'undefined');
-        // Allow static and preflight requests without origin
         if ((req && req.url && req.url.startsWith('/static')) || (req && req.method === 'OPTIONS')) {
           return callback(null, true);
         }
@@ -47,14 +48,10 @@ const corsOptions = {
       }
       const normalizedOrigin = normalizeDomain(origin);
       console.log('Normalized origin:', normalizedOrigin);
-   if (
-  normalizedOrigin.startsWith('http://localhost') ||
-  normalizedOrigin.startsWith('https://chatbot-blue-zeta.vercel.app')
-) {
-  console.log('Allowing origin:', normalizedOrigin);
-  return callback(null, true);
-}
-
+      if (STATIC_DOMAINS.includes(normalizedOrigin) || normalizedOrigin.startsWith('http://localhost')) {
+        console.log('Allowing static or localhost origin:', normalizedOrigin);
+        return callback(null, true);
+      }
       const user = await User.findOne({ allowedDomains: normalizedOrigin });
       if (user) {
         console.log('Origin allowed for user:', { userId: user._id, origin: normalizedOrigin });
@@ -134,6 +131,7 @@ app.get('/chats', authenticateApiKey, async (req, res) => {
 
 app.post('/signup', async (req, res) => {
   const { username, password } = req.body;
+  console.log(username, password);
   const existing = await User.findOne({ username });
   if (existing) return res.status(400).json({ error: 'User already exists' });
   const hashed = await bcrypt.hash(password, 10);
@@ -149,7 +147,10 @@ app.post('/login', async (req, res) => {
   const valid = await bcrypt.compare(password, user.password);
   if (!valid) return res.status(400).json({ error: 'Invalid login' });
   const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET);
-  res.json({ token });
+  res.json(
+    { token, 
+      userid:user._id,
+    });
 });
 
 app.get('/user/domains', authenticateToken, async (req, res) => {
