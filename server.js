@@ -13,7 +13,7 @@ const Analytics = require('./models/Analytics');
 const widgetRoute = require('./routes/widget');
 const cors = require('cors');
 const { job } = require('./cron');
-const authenticateApiKey = require('./middleware/authenticateApiKey');
+const authenticateApiKey = require('middleware/authenticateApiKey');
 
 dotenv.config();
 const app = express();
@@ -27,16 +27,22 @@ const normalizeDomain = (domain) => {
 };
 
 const corsOptions = {
-  origin: async function (origin, callback) {
+  origin: async function (origin, callback, req) {
     try {
-      console.log('CORS check:', { origin, url: this.url, method: this.method });
+      console.log('CORS check:', {
+        origin,
+        url: req ? req.url : 'undefined',
+        method: req ? req.method : 'undefined',
+        headers: req ? req.headers : 'undefined',
+        ip: req ? req.ip : 'undefined'
+      });
       if (!origin) {
-        console.log('No origin, allowing request for URL:', this.url);
+        console.log('No origin, allowing request for URL:', req ? req.url : 'undefined');
         // Allow static and preflight requests without origin
-        if (this.url.startsWith('/static') || this.method === 'OPTIONS') {
+        if ((req && req.url && req.url.startsWith('/static')) || (req && req.method === 'OPTIONS')) {
           return callback(null, true);
         }
-        console.warn('Rejecting undefined origin for non-static/non-OPTIONS request:', this.url);
+        console.warn('Rejecting undefined origin for non-static/non-OPTIONS request:', req ? req.url : 'undefined');
         return callback(new Error('Origin required for this request'));
       }
       const normalizedOrigin = normalizeDomain(origin);
