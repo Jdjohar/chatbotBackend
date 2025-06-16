@@ -47,10 +47,14 @@ const corsOptions = {
       }
       const normalizedOrigin = normalizeDomain(origin);
       console.log('Normalized origin:', normalizedOrigin);
-      if (normalizedOrigin.startsWith('http://localhost')) {
-        console.log('Allowing localhost origin');
-        return callback(null, true);
-      }
+   if (
+  normalizedOrigin.startsWith('http://localhost') ||
+  normalizedOrigin.startsWith('https://chatbot-blue-zeta.vercel.app')
+) {
+  console.log('Allowing origin:', normalizedOrigin);
+  return callback(null, true);
+}
+
       const user = await User.findOne({ allowedDomains: normalizedOrigin });
       if (user) {
         console.log('Origin allowed for user:', { userId: user._id, origin: normalizedOrigin });
@@ -130,7 +134,6 @@ app.get('/chats', authenticateApiKey, async (req, res) => {
 
 app.post('/signup', async (req, res) => {
   const { username, password } = req.body;
-  console.log(username, password);
   const existing = await User.findOne({ username });
   if (existing) return res.status(400).json({ error: 'User already exists' });
   const hashed = await bcrypt.hash(password, 10);
