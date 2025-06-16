@@ -19,7 +19,7 @@ dotenv.config();
 const app = express();
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
-
+app.use('/static', express.static('static'));
 // Normalize domain: remove trailing slash, enforce lowercase
 const normalizeDomain = (domain) => {
   if (!domain) return domain;
@@ -76,7 +76,7 @@ mongoose.connect(process.env.MONGODB_URI, {
   useUnifiedTopology: true,
 });
 console.log('MongoDB connected');
-app.use('/static', express.static('static'));
+
 
 const UPGRADE_MESSAGE = 'You have reached your plan limit. Upgrade to the paid plan for unlimited questions and uploads at https://careerengine.in/upgrade.';
 
